@@ -304,6 +304,14 @@ button.toggle,button.chip{width:100%;font-family:var(--ui)}
           <div class="ticks" id="sizeTicks"><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span></div>
         </div>
 
+        <div class="field">
+          <label>找数顺序 <b id="vOrder">1 → N</b></label>
+          <div class="seg" id="orderSeg">
+            <button data-order="asc" aria-pressed="true">顺序 1→N</button>
+            <button data-order="desc" aria-pressed="false">倒序 N→1</button>
+          </div>
+        </div>
+
         <div class="field" id="dirField" hidden>
           <label>旋转方向 <b id="vDir">顺 · 逆 · 顺</b></label>
           <div class="seg" id="dirSeg">
@@ -430,6 +438,8 @@ var MODES = {
 // 三环:内 / 中 / 外 的号码数,总数与同级方格接近 (5 级 = 24 个,对应 5×5)
 function RINGS(n){ var c = [n+1, n+3, n+5]; return {counts:c, total:c[0]+c[1]+c[2]}; }
 function cellCount(){ return cfg.mode === "rings" ? RINGS(cfg.n).total : cfg.n*cfg.n; }
+function firstNum(){ return cfg.order === "desc" ? cellCount() : 1; }
+function orderText(){ var N = cellCount(); return cfg.order === "desc" ? (N + " → 1") : ("1 → " + N); }
 var SPEED_LABEL = ["","慢","较慢","中","快","极快"];
 // 每格用时参考带 (秒/格), 5x5 静态 => 16 / 20 / 26 秒
 var BANDS = [
@@ -463,7 +473,7 @@ function $(id){ return document.getElementById(id); }
 var arena=$("arena"), wrap=arena.parentElement, veil=$("veil"), bars=$("bars"), sheet=$("sheet");
 
 /* ---------------- state ---------------- */
-var cfg = {mode:"drift", n:5, speed:3, fix:false, outerCW:true};
+var cfg = {mode:"drift", n:5, speed:3, fix:false, outerCW:true, order:"asc"};
 var ringAng = [0,0,0];
 var S = null;           // running session
 var tiles = [];
@@ -521,8 +531,19 @@ Array.prototype.forEach.call(document.querySelectorAll("#dirSeg button"), functi
     $("vDir").textContent = cfg.outerCW ? "顺 · 逆 · 顺" : "逆 · 顺 · 逆";
   });
 });
+Array.prototype.forEach.call(document.querySelectorAll("#orderSeg button"), function(b){
+  b.addEventListener("click", function(){
+    if(S) return;
+    cfg.order = b.dataset.order;
+    Array.prototype.forEach.call(document.querySelectorAll("#orderSeg button"), function(x){
+      x.setAttribute("aria-pressed", x === b ? "true":"false");
+    });
+    $("vOrder").textContent = cfg.order === "desc" ? "N → 1" : "1 → N";
+    renderBest(); preview();
+  });
+});
 Array.prototype.forEach.call(document.querySelectorAll("#modes .chip"), function(b){
-  b.addEventListener("click", function(){ if(S) return; setMode(b.dataset.mode); });
+  b.addEventListener("click", function(){ if(S) return; setMode(b.dataset.mode); preview(); });
 });
 $("size").addEventListener("input", function(){
   if(S){ this.value = cfg.n; return; }
@@ -571,7 +592,7 @@ function renderScale(){
 /* ---------------- meta render ---------------- */
 function levelOf(xp){ return Math.floor(Math.sqrt(xp/220)) + 1; }
 function xpFor(l){ return Math.round(220*(l-1)*(l-1)); }
-function bestKey(){ return cfg.mode + "-" + cfg.n + (cfg.mode === "rings" ? (cfg.outerCW?"-cw":"-ccw") : ""); }
+function bestKey(){ return cfg.mode + "-" + cfg.n + (cfg.mode === "rings" ? (cfg.outerCW?"-cw":"-ccw") : "") + (cfg.order==="desc" ? "-r" : ""); }
 function renderBest(){
   var b = save.best[bestKey()];
   $("vBest").textContent = b ? (b.toFixed(1)+"s") : "—";
@@ -719,8 +740,8 @@ function preview(){
   veil.hidden = false; veil.classList.add("idle");
   $("veilCount").hidden = true;
   $("veilTitle").textContent = "准备开始";
-  $("veilTip").innerHTML = "按顺序点出 <b>1 → " + cellCount() + "</b>,点错扣连击。<br>模式、规模与速度在下方「任务设定」里调。";
-  $("vTarget").textContent = "1";
+  $("veilTip").innerHTML = "按顺序点出 <b>" + orderText() + "</b>,点错扣连击。<br>模式、规模与速度在下方「任务设定」里调。";
+  $("vTarget").textContent = firstNum();
   $("vTime").innerHTML = "0.0<small>s</small>";
   $("vCombo").textContent = "0"; $("vCombo").classList.remove("hot");
   $("vProg").innerHTML = "0<small>/" + cellCount() + "</small>";
@@ -802,9 +823,9 @@ function start(){
   if(S) return;
   ac();
   build(true);
-  var total = cellCount();
-  S = {next:1, total:total, t0:0, last:0, rts:[], errors:0, combo:0, maxCombo:0, live:false};
-  $("vTarget").textContent = "1";
+  var total = cellCount(), step = cfg.order === "desc" ? -1 : 1;
+  S = {next:(step > 0 ? 1 : total), step:step, done:0, total:total, t0:0, last:0, rts:[], errors:0, combo:0, maxCombo:0, live:false};
+  $("vTarget").textContent = S.next;
   $("vCombo").textContent = "0"; $("vCombo").classList.remove("hot");
   $("vTime").innerHTML = "0.0<small>s</small>";
   $("vProg").innerHTML = "0<small>/"+total+"</small>";
@@ -819,7 +840,7 @@ function countdown(k){
   $("veilTitle").textContent = cfg.fix ? "注视中心十字" : "准备";
   $("veilTip").innerHTML = cfg.fix
     ? "把视线钉在中心,靠<b>余光</b>找数字 —— 这是舒尔特训练真正在练的东西。"
-    : "按 <b>1 → " + cellCount() + "</b> 的顺序点击。";
+    : "按 <b>" + orderText() + "</b> 的顺序点击。";
   var c = $("veilCount"); c.hidden = false; c.textContent = k; sndTick();
   setTimeout(function(){
     if(!S) return;
@@ -862,16 +883,17 @@ function onTap(e){
     var now = performance.now(), rt = (now - S.last)/1000; S.last = now;
     S.rts.push(rt); t.got = true;
     S.combo++; if(S.combo > S.maxCombo) S.maxCombo = S.combo;
-    sndHit(S.next, S.total);
+    S.done++;
+    sndHit(S.done, S.total);
     trace(t);
     el.classList.add("hit");
     setTimeout(function(){ el.classList.remove("hit"); el.classList.add("got"); el.tabIndex = -1; }, 130);
-    S.next++;
-    $("vProg").innerHTML = (S.next-1) + "<small>/" + S.total + "</small>";
+    S.next += S.step;
+    $("vProg").innerHTML = S.done + "<small>/" + S.total + "</small>";
     $("vCombo").textContent = S.combo;
     $("vCombo").classList.toggle("hot", S.combo >= 8);
     pushBar(rt);
-    if(S.next > S.total){ finish(); } else { $("vTarget").textContent = S.next; }
+    if(S.done >= S.total){ finish(); } else { $("vTarget").textContent = S.next; }
   } else {
     S.errors++; S.combo = 0;
     $("vCombo").textContent = "0"; $("vCombo").classList.remove("hot");
@@ -939,6 +961,7 @@ function finish(){
   $("rConf").textContent = (cfg.mode === "rings"
       ? (RINGS(cfg.n).counts.join("+") + " · " + MODES[cfg.mode].name + " · " + (cfg.outerCW ? "顺逆顺" : "逆顺逆"))
       : (cfg.n + "×" + cfg.n + " · " + MODES[cfg.mode].name))
+    + (cfg.order === "desc" ? " · 倒序" : "")
     + (cfg.fix ? " · 定点注视" : "");
   $("rTime").innerHTML = sec.toFixed(1) + "<small>s</small>";
   $("rDelta").textContent = isRec ? "本配置新纪录" : ("最佳 " + prev.toFixed(1) + "s · 慢了 " + (sec-prev).toFixed(1) + "s");
@@ -948,7 +971,7 @@ function finish(){
   $("rErr").textContent = S.errors;
   $("rErr").style.color = S.errors ? "#E4635C" : "";
   $("rSd").innerHTML = sd.toFixed(2) + '<small style="font-family:var(--ui);font-size:11px;color:var(--muted-2);font-weight:400"> s</small>';
-  drawChart(S.rts, mean);
+  drawChart(S.rts, mean, cfg.order === "desc");
 
   var ul = "";
   if(isRec) ul += '<span class="pill rec">新纪录</span>';
@@ -963,7 +986,7 @@ function finish(){
   $("vTarget").textContent = "—";
 }
 
-function drawChart(rts, mean){
+function drawChart(rts, mean, desc){
   var W = 520, H = 132, L = 34, R = 8, T = 10, B = 20;
   var iw = W - L - R, ih = H - T - B;
   var mx = Math.max.apply(null, rts), lo = Math.min.apply(null, rts);
@@ -987,8 +1010,8 @@ function drawChart(rts, mean){
   s += '<line x1="'+L+'" y1="'+my.toFixed(1)+'" x2="'+(W-R)+'" y2="'+my.toFixed(1)+'" stroke="#E4EDF4" stroke-width="1" stroke-dasharray="4 3" opacity="0.55"/>';
   s += '<text x="'+(W-R)+'" y="'+(my-5).toFixed(1)+'" text-anchor="end" fill="#E4EDF4" font-family="IBM Plex Mono, monospace" font-size="9.5" opacity="0.8">均值 '+mean.toFixed(2)+'s</text>';
   // x labels
-  s += '<text x="'+L+'" y="'+(H-6)+'" fill="#5D7183" font-family="IBM Plex Mono, monospace" font-size="9.5">1</text>';
-  s += '<text x="'+(W-R)+'" y="'+(H-6)+'" text-anchor="end" fill="#5D7183" font-family="IBM Plex Mono, monospace" font-size="9.5">'+rts.length+'</text>';
+  s += '<text x="'+L+'" y="'+(H-6)+'" fill="#5D7183" font-family="IBM Plex Mono, monospace" font-size="9.5">'+(desc ? rts.length : 1)+'</text>';
+  s += '<text x="'+(W-R)+'" y="'+(H-6)+'" text-anchor="end" fill="#5D7183" font-family="IBM Plex Mono, monospace" font-size="9.5">'+(desc ? 1 : rts.length)+'</text>';
   s += '<text x="'+(L+iw/2)+'" y="'+(H-6)+'" text-anchor="middle" fill="#5D7183" font-family="IBM Plex Mono, monospace" font-size="9.5">最快 '+lo.toFixed(2)+'s · 最慢 '+mx.toFixed(2)+'s</text>';
   $("rChart").innerHTML = s;
 }
